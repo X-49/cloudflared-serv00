@@ -1,64 +1,64 @@
 #!/bin/sh
 
-# 设置变量
+# Set variables
 HOME_DIR="${HOME}/cloudflared-serv00"
 LOG_FILE="${HOME_DIR}/cloudflared.log"
 MAX_LOG_SIZE=$((10 * 1024 * 1024))  # 10MB
 
-# 检查Go编译器
+# Check Go compiler
 check_go() {
     if ! command -v go >/dev/null 2>&1; then
-        echo "错误: 未安装Go编译器。请先安装Go。"
+        echo "Error: Go compiler is not installed, please install Go first."
         exit 1
     fi
 }
 
-# 下载并安装 cloudflared
+# Download and install Cloudflare Tunnel
 install_cloudflared() {
-    echo "开始安装 cloudflared..."
+    echo "Starting the installation of cloudflared..."
     GITHUB_URI="https://github.com/cloudflare/cloudflared"
     PAGE_CONTENT=$(fetch -q -o - ${GITHUB_URI}/releases)
     VERSION=$(echo "${PAGE_CONTENT}" | grep -o "href=\"/cloudflare/cloudflared/releases/tag/[^\"]*" | head -n 1 | sed "s;href=\"/cloudflare/cloudflared/releases/tag/;;")
     
-    fetch -o cloudflared.tar.gz "${GITHUB_URI}/archive/refs/tags/${VERSION}.tar.gz" || { echo "下载失败"; exit 1; }
-    tar zxf cloudflared.tar.gz || { echo "解压失败"; exit 1; }
-    cd cloudflared-${VERSION#v} || { echo "进入目录失败"; exit 1; }
+    fetch -o cloudflared.tar.gz "${GITHUB_URI}/archive/refs/tags/${VERSION}.tar.gz" || { echo "Failed to download."; exit 1; }
+    tar zxf cloudflared.tar.gz || { echo "Unzip failed."; exit 1; }
+    cd cloudflared-${VERSION#v} || { echo "Failed to enter directory."; exit 1; }
     
-    go build -o cloudflared ./cmd/cloudflared || { echo "编译失败"; exit 1; }
-    mv -f ./cloudflared ${HOME_DIR}/cloudflared-freebsd || { echo "移动文件失败"; exit 1; }
-    chmod +x ${HOME_DIR}/cloudflared-freebsd || { echo "修改权限失败"; exit 1; }
+    go build -o cloudflared ./cmd/cloudflared || { echo "Compilation Failure"; exit 1; }
+    mv -f ./cloudflared ${HOME_DIR}/cloudflared-freebsd || { echo "Failed to move file."; exit 1; }
+    chmod +x ${HOME_DIR}/cloudflared-freebsd || { echo "Failed to modify permissions."; exit 1; }
     cd ${HOME_DIR}
     rm -rf cloudflared.tar.gz cloudflared-${VERSION#v}
-    echo "cloudflared 安装完成。"
+    echo "Cloudflare Tunnel installation is complete."
 }
 
-# 获取并验证用户输入的 token
+# Get and validate user-entered token
 get_and_verify_token() {
     while true; do
-        printf "请输入您的 Cloudflare 隧道 token: "
+        printf "Please enter your Cloudflare Tunnel token: "
         read -r ARGO_AUTH
         if [ -z "$ARGO_AUTH" ]; then
-            echo "未输入 token，跳过配置步骤。"
+            echo "No token is entered, the configuration step is skipped."
             return 1
         fi
         
-        echo "正在验证 token..."
+        echo "Validating token..."
         ${HOME_DIR}/cloudflared-freebsd tunnel --edge-ip-version ipv4 --protocol quic --no-autoupdate run --url localhost:4500 --token $ARGO_AUTH > /dev/null 2>&1 &
         CLOUDFLARED_PID=$!
         sleep 5
         
         if kill -0 $CLOUDFLARED_PID 2>/dev/null; then
-            echo "Token 验证成功！"
+            echo "Token authentication was successful!"
             kill $CLOUDFLARED_PID
             wait $CLOUDFLARED_PID 2>/dev/null
             return 0
         else
-            echo "Token 验证失败。请检查您的 token 并重新输入。"
+            echo "Token authentication failed. Please check your token and re-enter it."
         fi
     done
 }
 
-# 创建启动脚本
+# Create a startup script
 create_start_script() {
     cat <<EOF > ${HOME_DIR}/start_cloudflared.sh
 #!/bin/sh
@@ -69,28 +69,28 @@ rotate_log() {
     fi
 }
 rotate_log
-TZ='Asia/Shanghai' nohup ${HOME_DIR}/cloudflared-freebsd tunnel --edge-ip-version ipv4 --protocol quic --no-autoupdate run --url localhost:4500 --token $ARGO_AUTH >> ${LOG_FILE} 2>&1 &
+TZ='Europe/Moscow' nohup ${HOME_DIR}/cloudflared-freebsd tunnel --edge-ip-version ipv4 --protocol quic --no-autoupdate run --url localhost:4500 --token $ARGO_AUTH >> ${LOG_FILE} 2>&1 &
 EOF
-    chmod +x ${HOME_DIR}/start_cloudflared.sh || { echo "创建启动脚本失败"; exit 1; }
-    echo "启动脚本start_cloudflared.sh已创建。"
+    chmod +x ${HOME_DIR}/start_cloudflared.sh || { echo "Failed to create startup script."; exit 1; }
+    echo "The startup script start_cloudflared.sh has been created."
 }
 
-# 添加到用户的 crontab
+# Add to the user's crontab
 add_to_crontab() {
-    (crontab -l 2>/dev/null | grep -v "@reboot cd ${HOME_DIR} && bash start_cloudflared.sh"; echo "@reboot cd ${HOME_DIR} && bash start_cloudflared.sh") | crontab - || { echo "添加到crontab失败"; exit 1; }
-    echo "已添加到 crontab，start_cloudflared.sh将在系统重启后自动运行。"
+    (crontab -l 2>/dev/null | grep -v "@reboot cd ${HOME_DIR} && bash start_cloudflared.sh"; echo "@reboot cd ${HOME_DIR} && bash start_cloudflared.sh") | crontab - || { echo "Add to crontab failed."; exit 1; }
+    echo "Has been added to the crontab, start_cloudflared.sh will run automatically after a system reboot."
 }
 
-# 卸载功能
+# Uninstallation function
 uninstall() {
-    echo "正在卸载 cloudflared..."
+    echo "Uninstalling cloudflared..."
     pkill -f cloudflared-freebsd
     rm -f ${HOME_DIR}/cloudflared-freebsd ${HOME_DIR}/start_cloudflared.sh ${LOG_FILE}
     crontab -l 2>/dev/null | grep -v "@reboot cd ${HOME_DIR} && bash start_cloudflared.sh" | crontab -
-    echo "cloudflared 已卸载。"
+    echo "Cloudflare Tunnel has been uninstalled."
 }
 
-# 主函数
+# Main Functions
 main() {
     if [ "$1" = "uninstall" ]; then
         uninstall
@@ -98,25 +98,25 @@ main() {
     fi
 
     check_go
-    mkdir -p ${HOME_DIR} || { echo "创建目录失败"; exit 1; }
-    cd ${HOME_DIR} || { echo "进入目录失败"; exit 1; }
+    mkdir -p ${HOME_DIR} || { echo "Failed to create directory."; exit 1; }
+    cd ${HOME_DIR} || { echo "Failed to enter directory."; exit 1; }
     install_cloudflared
     
-    echo "cloudflared 已安装。您想现在配置并运行隧道吗？ (y/n)"
+    echo "Cloudflare Tunnel is installed. Do you want to configure and run the tunnel now? (y/n)"
     read -r response
     if [ "$response" = "y" ] || [ "$response" = "Y" ]; then
         if get_and_verify_token; then
             create_start_script
             add_to_crontab
             ${HOME_DIR}/start_cloudflared.sh
-            echo "Cloudflared 已配置并启动。它将在系统重启后自动运行。"
+            echo "Cloudflared is configured and started. It will run automatically after a system reboot."
         else
-            echo "未配置 token。您可以稍后手动配置和运行 cloudflared。"
+            echo "No token is configured, you can configure and run cloudflared manually later."
         fi
     else
-        echo "跳过配置。您可以稍后手动配置和运行 cloudflared。"
+        echo "Skip configuration, you can configure and run cloudflared manually later."
     fi
 }
 
-# 运行主函数
+# Running the main function
 main "$@"
